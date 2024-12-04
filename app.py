@@ -41,7 +41,7 @@ with col22:
 
 
 # Create a row with two columns to place buttons side by side
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.page_link("app.py", label="Home", use_container_width=True)
@@ -50,7 +50,9 @@ with col2:
     st.page_link("pages/punto1.py", label="Series Examples", use_container_width=True)
 
 with col3:
-    st.page_link("pages/punto2.py", label="Signal Modulation", use_container_width=True)
+    st.page_link("pages/punto2.py", label="Signal Mod", use_container_width=True)
 
 with col4:
-    st.page_link("pages/punto1.py", label="Amplitude Modulation", use_container_width=True)
+    st.page_link("pages/punto3.py", label="Amplitude Mod", use_container_width=True)
+with col5:
+    st.page_link("pages/punto4.py", label="DSB-LC", use_container_width=True)

@@ -1,6 +1,8 @@
+import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-import streamlit as st
+from scipy.io import wavfile
+import io
 
 st.markdown("<h1 style='text-align: center; color: white;'>Signal Modulation</h1>", unsafe_allow_html=True)
 st.markdown("<h3 style='text-align: center; color: white;'>Modulation and Demodulation of an Audio File</h3>", unsafe_allow_html=True)
@@ -30,7 +32,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-col1, col2, col3, col4 = st.columns(4)
+# Create a row with two columns to place buttons side by side
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.page_link("app.py", label="Home", use_container_width=True)
@@ -39,272 +42,252 @@ with col2:
     st.page_link("pages/punto1.py", label="Series Examples", use_container_width=True)
 
 with col3:
-    st.page_link("pages/punto2.py", label="Signal Modulation", use_container_width=True)
+    st.page_link("pages/punto2.py", label="Signal Mod", use_container_width=True)
 
 with col4:
-    st.page_link("pages/punto1.py", label="Amplitude Modulation", use_container_width=True)
+    st.page_link("pages/punto3.py", label="Amplitude Mod", use_container_width=True)
+with col5:
+    st.page_link("pages/punto4.py", label="DSB-LC", use_container_width=True)
 
+def filtro_pasa_bajas(signal, w_0, fs):
+    w = 2*np.pi* np.fft.fftfreq(len(signal), d=1/fs)
+    x_w = np.fft.fft(signal)
+    filtro = np.abs(w) <= w_0
+    x_w_filtrado = x_w * filtro
+    signal_filtrada = np.fft.ifft(x_w_filtrado)
+    return np.real(signal_filtrada)
 
-from scipy.io import wavfile
+def create_plot(fig, subplot_pos, x, y, title, xlabel, ylabel, color='blue'):
+    ax = plt.subplot(subplot_pos)
+    plt.plot(x, y, color=color)
+    plt.title(title, fontsize=14, pad=10)  # Increased title font size
+    plt.xlabel(xlabel, fontsize=12)  # Increased x-label font size
+    plt.ylabel(ylabel, fontsize=12)  # Increased y-label font size
+    ax.tick_params(axis='both', which='major', labelsize=10)  # Increased tick label size
+    ax.patch.set_alpha(0.0)
+    ax.grid(True, alpha=0.3)
+    for spine in ax.spines.values():
+        spine.set_color('white')
 
-uploaded_files = st.file_uploader("Choose audio files", accept_multiple_files=True, type=["wav"])
-
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        # Read the file
-        samplerate, data = wavfile.read(uploaded_file)
-        
-        # Calculate the audio duration
-        length = data.shape[0] / samplerate
-
-        # Define status
-        if length != 0:
-            status = "Audio Uploaded"
-            status2 = "ON"
-        else:
-            status = "No Audio Data"
-            status2 = "OFF"
-
-        # Display metrics
-        col31, col32 = st.columns(2)
-        col31.metric("Status Audio", status, status2)
-        col32.metric("Duration", f"{length:.2f}", "SECONDS")
+def main():
+    st.title("Audio Analysis and Modulation")
     
-    time = np.linspace(0., length, data.shape[0])
+    # File upload
+    uploaded_file = st.file_uploader("Upload audio file (.wav)", type=['wav'])
+    
+    if uploaded_file is not None:
+        # Read audio file
+        try:
+            # Convert uploaded file to a format that wavfile.read can handle
+            audio_bytes = uploaded_file.read()
+            audio_stream = io.BytesIO(audio_bytes)
+            samplerate, data = wavfile.read(audio_stream)
+            
+            # Show basic audio information
+            length = data.shape[0] / samplerate
+            st.write(f"Sample rate: {samplerate} Hz")
+            st.write(f"Duration: {length:.2f} seconds")
+            
+            # Create time vector
+            t = np.linspace(0, length, data.shape[0])
+            
+            # Process audio (mono or stereo)
+            if len(data.shape) == 2 and data.shape[1] == 2:
+                st.write("Stereo audio detected")
+                x_t = data[:, 0]/np.max(data[:, 0])  # Use left channel
+            else:
+                st.write("Mono audio detected")
+                x_t = data/np.max(data)
+            
+            # Carrier parameters in sidebar
+            st.sidebar.header("Modulation Parameters")
+            A = st.sidebar.slider("Carrier amplitude", 0.1, 2.0, 1.0)
+            
+            # Calculate original signal frequency
+            n_muestras = len(x_t)
+            frecuencias = np.fft.fftfreq(n_muestras, d=1/samplerate)
+            
+            # FFT of original signal
+            w = np.linspace(-len(x_t)/2, len(x_t)/2, len(x_t))
+            x_w = np.fft.fft(x_t)
+            x_w_centrado = np.abs(np.fft.fftshift(x_w))
+            x_w_normalizado = x_w_centrado/np.max(x_w_centrado)
+            
+            # Find dominant frequency
+            frecuencias_centradas = np.fft.fftshift(frecuencias)
+            indice_frecuencia = np.argmax(x_w_centrado)
+            frecuencia = abs(frecuencias_centradas[indice_frecuencia])
+            
+            st.write(f"Detected dominant frequency: {frecuencia:.2f} Hz")
+            
+            # Carrier frequency selector
+            f0 = st.sidebar.slider("Carrier frequency (Hz)", 
+                                 min_value=int(10*frecuencia),
+                                 max_value=int(50*frecuencia),
+                                 value=int(20*frecuencia))
+            
+            # Filter cutoff frequency
+            w_corte = st.sidebar.slider("Filter cutoff frequency (Hz)",
+                                      min_value=100,
+                                      max_value=5000,
+                                      value=2000)
+            
+            # Generate carrier signal
+            w0 = 2 * np.pi * f0
+            p_t = A * np.cos(w0 * t)
+            
+            # Modulation
+            x_mod = x_t * p_t
+            
+            # Demodulation
+            x_dem = x_mod * p_t
+            
+            # Filtering
+            x_recuperada = filtro_pasa_bajas(x_dem, 2*np.pi*w_corte, samplerate)
+            
+            # FFT calculations
+            def calc_fft(signal):
+                fft = np.fft.fft(signal)
+                fft_centered = np.abs(np.fft.fftshift(fft))
+                return fft_centered/np.max(fft_centered)
+            
+            p_w_normalizado = calc_fft(p_t)
+            x_mod_w_normalizado = calc_fft(x_mod)
+            x_w_dem_normalizado = calc_fft(x_dem)
+            x_recuperada_w_normalizado = calc_fft(x_recuperada)
+            
+            # 1. Initial audio visualization (stereo/mono)
+            if len(data.shape) == 2 and data.shape[1] == 2:
+                st.header("Original Audio Signal (Stereo)")
+                fig_stereo = plt.figure(figsize=(15, 6))
+                plt.style.use("dark_background")
+                create_plot(fig_stereo, 111, t, data[:, 0] / np.max(data[:, 0]), 
+                          "Audio Channels", "Time [s]", "Amplitude", "blue")
+                plt.plot(t, data[:, 1] / np.max(data[:, 1]), label="Right channel", color="red")
+                plt.legend(["Left channel", "Right channel"], fontsize=10)
+                fig_stereo.patch.set_alpha(0.0)
+                plt.tight_layout()
+                st.pyplot(fig_stereo)
 
-    if len(data.shape) == 2 and data.shape[1] == 2:  
-        fig, ax = plt.subplots()
-        ax.plot(time, data[:, 0] / np.max(data[:, 0]), label="Left channel")
-        ax.plot(time, data[:, 1] / np.max(data[:, 1]), label="Right channel")
-        ax.legend()
-        ax.set_xlabel("Time [s]")
-        ax.set_ylabel("Amplitude")
-        ax.set_title("Stereo signal")
-        plt.style.use("dark_background")
-        fig.patch.set_alpha(0.0)  # Fondo de la figura
-        ax.patch.set_alpha(0.0)   # Fondo del área de los ejes
-        st.pyplot(fig)
-    else:  
-        fig, ax = plt.subplots()
-        ax.plot(time, data / np.max(data), label="Mono channel")
-        ax.legend()
-        plt.style.use("dark_background")
-        fig.patch.set_alpha(0.0)  # Fondo de la figura
-        ax.patch.set_alpha(0.0)   # Fondo del área de los ejes
-        ax.set_xlabel("Time [s]")
-        ax.set_ylabel("Amplitude")
-        ax.set_title("Mono signal")
-        st.pyplot(fig)
-        
-    if data.shape[1] == 2:
-        x_t = data[:, 0] / np.max(data[:, 0])
+            # 2. Original Signal vs FFT
+            st.header("Original Signal and its Transform")
+            fig1 = plt.figure(figsize=(15, 6))
+            plt.style.use("dark_background")
+            create_plot(fig1, 121, t, x_t, "Original Signal - Time", "Time [s]", "Amplitude")
+            create_plot(fig1, 122, w, x_w_normalizado, "Original Signal - Frequency", "Frequency [Hz]", "Magnitude")
+            fig1.patch.set_alpha(0.0)
+            plt.tight_layout()
+            st.pyplot(fig1)
+            
+            # 3. Carrier Signal
+            st.header("Carrier Signal")
+            fig2 = plt.figure(figsize=(15, 6))
+            create_plot(fig2, 121, t[:500], p_t[:500], "Carrier Signal - Time", "Time [s]", "Amplitude")
+            create_plot(fig2, 122, w, p_w_normalizado, "Carrier Signal - Frequency", "Frequency [Hz]", "Magnitude")
+            fig2.patch.set_alpha(0.0)
+            plt.tight_layout()
+            st.pyplot(fig2)
+            
+            # 4. Modulated Signal
+            st.header("Modulated Signal")
+            fig3 = plt.figure(figsize=(15, 6))
+            create_plot(fig3, 121, t, x_mod, "Modulated Signal - Time", "Time [s]", "Amplitude")
+            create_plot(fig3, 122, w, x_mod_w_normalizado, "Modulated Signal - Frequency", "Frequency [Hz]", "Magnitude")
+            fig3.patch.set_alpha(0.0)
+            plt.tight_layout()
+            st.pyplot(fig3)
+
+            # 5. Visual Comparison: Original vs Modulated (Time)
+            st.header("Comparison: Original vs Modulated")
+            fig_comp1 = plt.figure(figsize=(15, 6))
+            plt.subplot(211)
+            plt.plot(t[0:2000], x_t[0:2000], label="Original")
+            plt.title("Original Signal (First 2000 samples)", fontsize=14, pad=10)
+            plt.xlabel("Time [s]", fontsize=12)
+            plt.ylabel("Amplitude", fontsize=12)
+            plt.legend(fontsize=10)
+            plt.tick_params(axis='both', which='major', labelsize=10)
+
+            plt.subplot(212)
+            plt.plot(t[0:2000], x_mod[0:2000], label="Modulated")
+            plt.title("Modulated Signal (First 2000 samples)", fontsize=14, pad=10)
+            plt.xlabel("Time [s]", fontsize=12)
+            plt.ylabel("Amplitude", fontsize=12)
+            plt.legend(fontsize=10)
+            plt.tick_params(axis='both', which='major', labelsize=10)
+            fig_comp1.patch.set_alpha(0.0)
+            plt.tight_layout()
+            st.pyplot(fig_comp1)
+
+            # 6. Visual Comparison: Original vs Modulated (Frequency)
+            st.header("Comparison: Original vs Modulated Spectra")
+            fig_comp2 = plt.figure(figsize=(15, 6))
+            plt.subplot(211)
+            plt.plot(w, x_w_normalizado, label="Original")
+            plt.title("Original Signal Spectrum", fontsize=14, pad=10)
+            plt.xlabel("Frequency [Hz]", fontsize=12)
+            plt.ylabel("Magnitude", fontsize=12)
+            plt.legend(fontsize=10)
+            plt.tick_params(axis='both', which='major', labelsize=10)
+
+            plt.subplot(212)
+            plt.plot(w, x_mod_w_normalizado, label="Modulated")
+            plt.title("Modulated Signal Spectrum", fontsize=14, pad=10)
+            plt.xlabel("Frequency [Hz]", fontsize=12)
+            plt.ylabel("Magnitude", fontsize=12)
+            plt.legend(fontsize=10)
+            plt.tick_params(axis='both', which='major', labelsize=10)
+            fig_comp2.patch.set_alpha(0.0)
+            plt.tight_layout()
+            st.pyplot(fig_comp2)
+            
+            # 7. Complete Process (Original, Modulated, Demodulated)
+            st.header("Complete Modulation/Demodulation Process")
+            fig_complete = plt.figure(figsize=(15, 12))
+            
+            # Original signal
+            create_plot(fig_complete, 321, t[0:2000], x_t[0:2000], 
+                       "Original Signal", "Time [s]", "Amplitude")
+            
+            # Original transform
+            create_plot(fig_complete, 322, w, x_w_normalizado,
+                       "Original Spectrum", "Frequency [Hz]", "Magnitude")
+            
+            # Modulated signal
+            create_plot(fig_complete, 323, t[0:2000], x_mod[0:2000],
+                       "Modulated Signal", "Time [s]", "Amplitude")
+            
+            # Modulated transform
+            create_plot(fig_complete, 324, w, x_mod_w_normalizado,
+                       "Modulated Spectrum", "Frequency [Hz]", "Magnitude")
+            
+            # Demodulated signal without filtering
+            create_plot(fig_complete, 325, t[0:2000], x_dem[0:2000],
+                       "Demodulated Signal (Unfiltered)", "Time [s]", "Amplitude")
+            
+            # Demodulated transform
+            create_plot(fig_complete, 326, w, x_w_dem_normalizado,
+                       "Demodulated Spectrum", "Frequency [Hz]", "Magnitude")
+            
+            fig_complete.patch.set_alpha(0.0)
+            plt.tight_layout()
+            st.pyplot(fig_complete)
+            
+            # 8. Final Recovered Signal
+            st.header("Recovered Signal (After Filtering)")
+            fig5 = plt.figure(figsize=(15, 6))
+            create_plot(fig5, 121, t, x_recuperada, 
+                       "Recovered Signal - Time", "Time [s]", "Amplitude", "orange")
+            create_plot(fig5, 122, w, x_recuperada_w_normalizado,
+                       "Recovered Signal - Frequency", "Frequency [Hz]", "Magnitude", "orange")
+            fig5.patch.set_alpha(0.0)
+            plt.tight_layout()
+            st.pyplot(fig5)
+        except Exception as e:
+            st.error(f"Error processing file: {str(e)}")
+    
     else:
-        x_t = data
+        st.info("Please upload an audio file (.wav) to begin the analysis.")
 
-    w = np.linspace(-len(x_t)/2, len(x_t)/2, len(x_t))
-
-    x_w = np.fft.fft(x_t)
-    x_w_centrado = np.abs(np.fft.fftshift(x_w))
-    x_w_normalizado = x_w_centrado / np.max(x_w_centrado)
-
-    fig, ax = plt.subplots()
-    ax.plot(w, x_w_normalizado)
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax.patch.set_alpha(0.0)   # Fondo del área de los ejes
-    ax.set_ylabel('Normalized magnitude')
-    ax.set_xlabel('Frequency [Hz]')
-
-    st.pyplot(fig)
-
-    frecuencia_muestreo = samplerate
-    n_muestras = len(x_t)
-    frecuencias = np.fft.fftfreq(n_muestras, d=1/frecuencia_muestreo)
-    frecuencias_centradas = np.fft.fftshift(frecuencias)
-
-    indice_frecuencia = np.argmax(x_w_centrado)
-    frecuencia = frecuencias_centradas[indice_frecuencia]
-
-    st.subheader(f"The frequency of the function is approximately {abs(frecuencia)} Hz")
-
-    A = st.number_input("Enter the carrier amplitude (e.g., 1):", value=1.0)
-    frecuencia_modulante = st.number_input("Enter the modulating signal frequency (in Hz, e.g., 30000):", value=30000.0)
-
-    f0 = st.number_input("Enter the carrier frequency (in Hz, e.g., 300000):", value=300000.0)
-
-    while f0 < (10 * frecuencia_modulante):
-        st.warning("The carrier frequency must be at least 10 times the modulating signal frequency.")
-        f0 = st.number_input("Enter the carrier frequency (in Hz, e.g., 300000):", value=f0)
-
-    w0 = 2 * np.pi * f0
-    p_t = A * np.cos(w0 * time)
-
-    st.subheader("Modulation")
-
-    x_mod = x_t * p_t
-
-    fig, ax = plt.subplots()
-    ax.plot(time, x_mod)
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax.patch.set_alpha(0.0)   # Fondo del área de los ejes
-    ax.set_ylabel('Normalized magnitude')
-    ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Amplitude")
-    ax.set_title("Modulating and Carrier Signal")
-
-    st.pyplot(fig)
-
-    st.subheader("Visual comparison of the original audio signal x_t with the modulated signal x_modS")
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-
-    ax1.plot(time[0:2000], x_t[0:2000])
-    ax1.set_title('x_t')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax1.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    ax2.plot(time[0:2000], x_mod[0:2000])
-    ax2.set_title('x_mod')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax2.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    st.pyplot(fig)
-
-    st.subheader("Calculation of the FFT of the modulated signal")
-    
-    w = np.linspace(-len(x_mod)/2, len(x_mod)/2, len(x_mod))
-
-    x_w_mod = np.fft.fft(x_mod)
-
-    x_w_mod_centrado = np.abs(np.fft.fftshift(x_w_mod))
-    x_w_mod_normalizado = x_w_mod_centrado / np.max(x_w_mod_centrado)
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(w, x_w_mod_normalizado)
-    plt.style.use("dark_background")
-
-    fig = plt.gcf()  # Obtener la figura actual
-    ax = plt.gca()   # Obtener el eje actual
-
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    st.pyplot(fig)
-
-    st.subheader("Original and Modulated Signal in the Frequency Domain")
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-
-    ax1.plot(w, x_w_normalizado)
-    ax1.set_title('Original Signal in Frequency Domain')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax1.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-
-    ax2.plot(w, x_w_mod_normalizado)
-    ax2.set_title('Modulated Signal in Frequency Domain')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax2.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-
-    st.pyplot(fig)
-
-    st.subheader("Demodulation")
-
-    x_dem = x_mod * p_t
-
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15))
-
-    ax1.plot(time[0:2000], x_t[0:2000])
-    ax1.set_title('Original Signal')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax1.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    ax2.plot(time[0:2000], x_mod[0:2000])
-    ax2.set_title('Modulated Signal')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax2.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    ax3.plot(time[0:2000], x_dem[0:2000])
-    ax3.set_title('Demodulated Signal (Unfiltered)')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax3.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    st.pyplot(fig)
-
-
-    st.subheader(" FFT of the demodulated signal")
-    x_w_dem = np.fft.fft(x_dem)
-    x_w_dem_centrado = np.abs(np.fft.fftshift(x_w_dem))
-    x_w_dem_normalizado = x_w_dem_centrado / np.max(x_w_dem_centrado)
-
-    # Configuración del estilo
-    plt.style.use("dark_background")
-
-    # Crear la figura y el eje
-    fig, ax1 = plt.subplots(figsize=(10, 5))
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax1.patch.set_alpha(0.0)  # Fondo del área de los ejes
-
-    # Graficar los datos
-    ax1.plot(w, x_w_dem_normalizado)
-
-    # Mostrar el gráfico en Streamlit
-    st.pyplot(fig)
-
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15))
-
-    ax1.plot(w, x_w_normalizado)
-    ax1.set_title('Original Signal in Frequency Domain')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax1.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    ax2.plot(w, x_w_mod_normalizado)
-    ax2.set_title('Modulated Signal in Frequency Domain')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax2.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    ax3.plot(w, x_w_dem_normalizado)
-    ax3.set_title('Demodulated Signal (Unfiltered) in Frequency Domain')
-    plt.style.use("dark_background")
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax3.patch.set_alpha(0.0)   # Fondo del área de los ejes
-
-    st.pyplot(fig)
-
-    st.subheader("Low-pass filtered signal")
-
-    limit1 = int(-samplerate/2 + int(len(w)/2))
-    limit2 = int(samplerate/2 + int(len(w)/2))
-
-    x_w_recortado = x_w_dem_normalizado[limit1:limit2]
-
-    # Configuración de estilo oscuro
-    plt.style.use("dark_background")
-
-    # Crear la figura y el eje
-    fig, ax3 = plt.subplots(figsize=(10, 5))
-    ax3.plot(x_w_recortado)
-
-    # Configurar transparencia de fondos
-    fig.patch.set_alpha(0.0)  # Fondo de la figura
-    ax3.patch.set_alpha(0.0)  # Fondo del área de los ejes
-
-    # Mostrar la gráfica en Streamlit
-    st.pyplot(fig)
-
-
-else:
-    st.warning("No audio files uploaded yet.")
-
-
+if __name__ == "__main__":
+    main()
