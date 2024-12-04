@@ -69,6 +69,18 @@ def create_plot(fig, subplot_pos, x, y, title, xlabel, ylabel, color='blue'):
     for spine in ax.spines.values():
         spine.set_color('white')
 
+def create_audio_file(signal, samplerate):
+    """Convert signal to WAV file bytes"""
+    # Normalize the signal to 16-bit range
+    normalized = np.int16(signal * 32767)
+    # Create a BytesIO buffer
+    buffer = io.BytesIO()
+    # Write the WAV file to the buffer
+    wavfile.write(buffer, samplerate, normalized)
+    # Get the buffer value
+    buffer.seek(0)
+    return buffer
+
 def main():
     st.title("Audio Analysis and Modulation")
     
@@ -87,6 +99,14 @@ def main():
             length = data.shape[0] / samplerate
             st.write(f"Sample rate: {samplerate} Hz")
             st.write(f"Duration: {length:.2f} seconds")
+
+            # Create columns for audio players
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Original Audio")
+                # Reset the uploaded file position
+                uploaded_file.seek(0)
+                st.audio(uploaded_file)
             
             # Create time vector
             t = np.linspace(0, length, data.shape[0])
@@ -144,6 +164,12 @@ def main():
             
             # Filtering
             x_recuperada = filtro_pasa_bajas(x_dem, 2*np.pi*w_corte, samplerate)
+            
+            # Add audio player for recovered signal in the second column
+            with col2:
+                st.subheader("Recovered Audio")
+                recovered_audio = create_audio_file(x_recuperada, samplerate)
+                st.audio(recovered_audio)
             
             # FFT calculations
             def calc_fft(signal):
@@ -283,6 +309,7 @@ def main():
             fig5.patch.set_alpha(0.0)
             plt.tight_layout()
             st.pyplot(fig5)
+            
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
     
